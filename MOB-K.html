@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<title>Bıçak Düşürme Oyunu - Tam Versiyon</title>
+<style>
+  body {
+    margin: 0;
+    background: #111;
+    color: white;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow: hidden;
+    cursor: pointer;
+    transition: background 1s ease;
+  }
+  h1, #score {
+    text-align: center;
+    text-shadow: 0 0 6px #0af;
+  }
+  canvas {
+    display: block;
+    margin: auto;
+    background: transparent;
+    border: 2px solid #0af;
+    border-radius: 10px;
+    box-shadow: 0 0 20px #0af;
+  }
+  #gameOverScreen, #difficultyScreen {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: #111;
+    border: 2px solid #0af;
+    padding: 30px;
+    border-radius: 12px;
+    text-align: center;
+    color: #0af;
+    z-index: 10;
+  }
+  #gameOverScreen { display: none; }
+  button {
+    margin: 10px;
+    background: #0af;
+    border: none;
+    padding: 10px 20px;
+    font-weight: bold;
+    font-size: 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: 0 0 10px #0af;
+    transition: background 0.3s ease;
+  }
+  button:hover {
+    background: #09c;
+  }
+</style>
+</head>
+<body>
+<h1>Bıçak Düşürme Oyunu</h1>
+<div id="score">Skor: 0 | En Yüksek Skor: 0</div>
+<canvas id="gameCanvas" width="400" height="600"></canvas>
+
+<!-- Zorluk Seçimi -->
+<div id="difficultyScreen">
+  <h2>Zorluk Seç:</h2>
+  <button onclick="startGame('easy')">Kolay</button>
+  <button onclick="startGame('medium')">Orta</button>
+  <button onclick="startGame('hard')">Zor</button>
+</div>
+
+<!-- Oyun Bitti -->
+<div id="gameOverScreen">
+  <div id="finalScore">Skorunuz: 0</div>
+  <button onclick="restartGame()">Tekrar Oyna</button>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const centerX = canvas.width / 2;
+const centerY = 300;
+const targetRadius = 70;
+
+let rotation = 0;
+let rotationSpeed = 0.02;
+let knives = [];
+let fallingKnives = [];
+let knifeLength = 60;
+let knifeWidth = 6;
+let canThrow = false;
+let score = 0;
+let collisionTolerance = 15 * Math.PI / 180;
+
+let gameStarted = false;
+
+const scoreDiv = document.getElementById('score');
+const gameOverScreen = document.getElementById('gameOverScreen');
+const finalScoreDiv = document.getElementById('finalScore');
+const difficultyScreen = document.getElementById('difficultyScreen');
+
+// Yüksek skor localStorage
+let highScore = localStorage.getItem('highScore') || 0;
+highScore = Number(highScore);
+
+function updateBackgroundColor(score) {
+  // Skora göre renk geçişi (mavi → mor → kırmızı)
+  if(score < 10){
+    const blue = Math.min(255, score * 25);
+    document.body.style.background = `rgb(0,0,${blue})`;
+  } else if(score < 20){
+    const red = Math.min(255, (score - 10) * 25);
+    document.body.style.background = `rgb(${red},0,255)`;
+  } else {
+    const green = Math.min(255, (score - 20) * 25);
+    document.body.style.background = `rgb(255,${green},255)`;
+  }
+}
+
+function startGame(difficulty) {
+  if (difficulty === 'easy') {
+    rotationSpeed = 0.015;
+    collisionTolerance = 20 * Math.PI / 180;
+  } else if (difficulty === 'medium') {
+    rotationSpeed = 0.03;
+    collisionTolerance = 15 * Math.PI / 180;
+  } else if (difficulty === 'hard') {
+    rotationSpeed = 0.05;
+    collisionTolerance = 10 * Math.PI / 180;
+  }
+  difficultyScreen.style.display = 'none';
+  canThrow = true;
+  gameStarted = true;
+  scoreDiv.textContent = `Skor: 0 | En Yüksek Skor: ${highScore}`;
+  document.body.style.background = '#000';
+}
+
+function drawTarget() {
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.rotate(rotation);
+  // Glow efekti için gölge
+  ctx.shadowColor = '#0af';
+  ctx.shadowBlur = 15;
+
+  ctx.beginPath();
+  ctx.arc(0, 0, targetRadius, 0, Math.PI * 2);
+  ctx.fillStyle = '#222';
+  ctx.fill();
+  ctx.lineWidth = 8;
+  ctx.strokeStyle = '#0af';
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawKnife(angle) {
+  ctx.save();
+  ctx.translate(centerX, centerY);
+  ctx.rotate(angle);
+  // Bıçak glow efekti
+  ctx.shadowColor = '#0af';
+  ctx.shadowBlur = 10;
+
+  ctx.fillStyle = '#0af';
+  ctx.fillRect(-knifeWidth / 2, -targetRadius - knifeLength, knifeWidth, knifeLength);
+  ctx.beginPath();
+  ctx.moveTo(-knifeWidth, -targetRadius - knifeLength);
+  ctx.lineTo(knifeWidth, -targetRadius - knifeLength);
+  ctx.lineTo(0, -targetRadius - knifeLength - 15);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawFallingKnives() {
+  for (let knife of fallingKnives) {
+    ctx.save();
+    ctx.translate(knife.x, knife.y);
+    ctx.shadowColor = '#0af';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = '#0af';
+    ctx.fillRect(-knifeWidth / 2, 0, knifeWidth, knifeLength);
+    ctx.beginPath();
+    ctx.moveTo(-knifeWidth, 0);
+    ctx.lineTo(knifeWidth, 0);
+    ctx.lineTo(0, 15);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function throwKnife() {
+  if (!canThrow || !gameStarted) return;
+  fallingKnives.push({ x: centerX, y: 0 });
+  canThrow = false;
+  setTimeout(() => { canThrow = true; }, 300);
+}
+
+function updateFallingKnives() {
+  for (let i = fallingKnives.length - 1; i >= 0; i--) {
+    fallingKnives[i].y += 10;
+    if (fallingKnives[i].y >= centerY - targetRadius - knifeLength) {
+      let newAngle = -rotation;
+      for (let angle of knives) {
+        let diff = Math.abs(angle - newAngle);
+        diff = diff > Math.PI ? 2 * Math.PI - diff : diff;
+        if (diff < collisionTolerance) {
+          fallingKnives.splice(i, 1);
+          gameOver();
+          return;
+        }
+      }
+      knives.push(newAngle);
+      score++;
+      if(score > highScore) {
+        highScore = score;
+        localStorage.setItem('highScore', highScore);
+      }
+      updateBackgroundColor(score);
+      scoreDiv.textContent = `Skor: ${score} | En Yüksek Skor: ${highScore}`;
+      rotationSpeed += 0.002;
+      fallingKnives.splice(i, 1);
+    }
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawTarget();
+  knives.forEach(angle => drawKnife(angle + rotation));
+  drawFallingKnives();
+}
+
+function gameLoop() {
+  if (gameStarted) {
+    rotation += rotationSpeed;
+    rotation %= (Math.PI * 2);
+    updateFallingKnives();
+    draw();
+  }
+  requestAnimationFrame(gameLoop);
+}
+
+function gameOver() {
+  canThrow = false;
+  gameOverScreen.style.display = 'block';
+  finalScoreDiv.textContent = `Skorunuz: ${score}`;
+}
+
+function restartGame() {
+  knives = [];
+  fallingKnives = [];
+  rotation = 0;
+  score = 0;
+  rotationSpeed = 0.02;
+  scoreDiv.textContent = `Skor: 0 | En Yüksek Skor: ${highScore}`;
+  canThrow = true;
+  gameOverScreen.style.display = 'none';
+  difficultyScreen.style.display = 'block';
+  gameStarted = false;
+}
+
+window.addEventListener('click', throwKnife);
+window.addEventListener('touchstart', throwKnife);
+
+gameLoop();
+</script>
+</body>
+</html>
